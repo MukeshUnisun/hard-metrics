@@ -1,0 +1,4 @@
+Django>=5.1,<6.1
+psutil>=6.0
+docker>=7.1
+gunicorn>=22.0
