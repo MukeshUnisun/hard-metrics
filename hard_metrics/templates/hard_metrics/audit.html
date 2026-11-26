@@ -1,0 +1,10 @@
+{% extends "hard_metrics/base.html" %}
+{% block title %}Audit log{% endblock %}
+{% block content %}
+<div class="glass"><h6>Audit log <span class="text-mut small">(last 300 actions: logins, blocks, deletes, downloads, container actions)</span></h6>
+<div class="scroll" style="max-height:70vh"><table class="table"><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Target</th><th>IP</th><th>Result</th></tr></thead><tbody>
+{% for l in logs %}<tr><td class="text-nowrap">{{ l.ts|date:"Y-m-d H:i:s" }}</td><td>{{ l.user }}</td><td>{{ l.action }}</td><td class="text-break">{{ l.target }}</td><td>{{ l.ip }}</td>
+<td>{% if l.ok %}<span class="badge text-bg-success">ok</span>{% else %}<span class="badge text-bg-danger">failed</span>{% endif %} <span class="small text-mut">{{ l.detail }}</span></td></tr>
+{% empty %}<tr><td colspan="6" class="text-mut">No actions recorded yet.</td></tr>{% endfor %}
+</tbody></table></div></div>
+{% endblock %}

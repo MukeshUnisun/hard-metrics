@@ -200,17 +200,13 @@ def backup():
                     "path": d.get("path", ""), "code": code, "ok": code == 0}
         except Exception:
             pass
-    newest = None
-    for d in settings.HM_BACKUP_DIRS:
-        for p in glob.glob(os.path.join(d, "*")):
-            if os.path.isfile(p) and (newest is None or os.path.getmtime(p) > os.path.getmtime(newest)):
-                newest = p
-    if not newest:
+    from . import backups
+    items = backups.list_backups()
+    if not items:
         return {"found": False}
-    age_h = (time.time() - os.path.getmtime(newest)) / 3600
-    ok = age_h <= settings.HM_BACKUP_MAX_AGE_HOURS
-    return {"found": True, "timestamp": datetime.fromtimestamp(os.path.getmtime(newest)).strftime("%Y-%m-%d %H:%M:%S"),
-            "size": os.path.getsize(newest), "path": newest, "code": 0 if ok else 1, "ok": ok}
+    n = items[0]
+    ok = n["size"] > 0 and n["age_h"] <= settings.HM_BACKUP_MAX_AGE_HOURS
+    return {"found": True, "timestamp": n["time"], "size": n["size"], "path": n["path"], "code": 0 if ok else 1, "ok": ok}
 
 
 def system_status():
@@ -271,7 +267,7 @@ def docker_containers():
         cpu_p, mu, ml = st.get(c.id, (0, 0, 0))
         ports = c.attrs.get("NetworkSettings", {}).get("Ports") or {}
         pm = [f"{b['HostPort']}→{k}" for k, v in ports.items() if v for b in v]
-        rows.append({"name": c.name, "image": (c.attrs.get("Config", {}).get("Image") or ""),
+        rows.append({"name": c.name, "project": c.labels.get("com.docker.compose.project", ""), "service": c.labels.get("com.docker.compose.service", ""), "workdir": c.labels.get("com.docker.compose.project.working_dir", ""), "image": (c.attrs.get("Config", {}).get("Image") or ""),
                      "image_id": c.attrs.get("Image", "")[7:19], "status": c.status, "uptime": _uptime(c),
                      "ports": sorted(set(pm)), "cpu": cpu_p, "mem_used": mu, "mem_limit": ml,
                      "mem_pct": round(mu / ml * 100, 2) if ml else 0})

@@ -1,0 +1,27 @@
+{% extends "hard_metrics/base.html" %}
+{% block title %}Backups{% endblock %}
+{% block content %}
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3"><div class="glass"><div class="text-mut small">Backup files</div><div class="big" id="cnt">-</div></div></div>
+  <div class="col-6 col-lg-3"><div class="glass"><div class="text-mut small">Total size</div><div class="big" id="tot">-</div></div></div>
+  <div class="col-6 col-lg-3"><div class="glass"><div class="text-mut small">Newest backup</div><div class="big" id="new">-</div></div></div>
+  <div class="col-6 col-lg-3"><div class="glass"><div class="text-mut small">Folders watched</div><div class="small" id="dirs"></div></div></div>
+</div>
+<div class="glass"><h6>Backup files {% if not can_delete %}<span class="text-mut small">(delete is off. Set HM_ENABLE_BACKUP_DELETE=True to enable)</span>{% endif %}</h6>
+<div class="scroll" style="max-height:60vh"><table class="table align-middle"><thead><tr><th>File</th><th>Size</th><th>Created</th><th>Age</th><th></th></tr></thead><tbody id="rows"></tbody></table></div><div id="msg" class="small mt-2"></div></div>
+{% endblock %}
+{% block script %}<script>
+const CAN_DELETE = {{ can_delete|yesno:"true,false" }};
+const age = h => h < 1 ? "just now" : h < 48 ? Math.round(h)+" h" : Math.round(h/24)+" days";
+async function load(){ try{ const j = await api("/api/backups/");
+  $("cnt").textContent = j.backups.length; $("tot").textContent = hum(j.backups.reduce((a,b)=>a+b.size,0));
+  $("new").textContent = j.backups.length ? age(j.backups[0].age_h) : "none"; $("dirs").innerHTML = j.dirs.map(esc).join("<br>");
+  $("rows").innerHTML = j.backups.map(b=>`<tr><td class="text-break"><b>${esc(b.name)}</b><div class="small text-mut">${esc(b.dir)}</div></td><td>${b.size?hum(b.size):'<span class="text-danger">0 B (empty)</span>'}</td><td>${esc(b.time)}</td><td>${age(b.age_h)}</td>
+   <td class="text-nowrap"><a class="btn btn-sm btn-outline-info" href="/api/backups/download/?path=${encodeURIComponent(b.path)}"><i class="bi bi-download"></i> Download</a>
+   ${CAN_DELETE?`<button class="btn btn-sm btn-outline-danger ms-1" data-del="${esc(b.path)}" data-n="${esc(b.name)}"><i class="bi bi-trash"></i></button>`:""}</td></tr>`).join("") || '<tr><td colspan="5" class="text-mut">No backup files found. Put backups in one of the watched folders (HM_BACKUP_DIRS).</td></tr>';
+ }catch(e){ $("msg").textContent = e.message; } }
+document.addEventListener("click", async e=>{ const b=e.target.closest("[data-del]"); if(!b) return;
+  if(prompt(`Delete backup permanently?\nType the file name to confirm:\n${b.dataset.n}`) !== b.dataset.n) return;
+  const j = await post("/api/backups/delete/", {path:b.dataset.del}); $("msg").innerHTML = j.ok ? '<span class="text-success">Deleted.</span>' : `<span class="text-danger">${esc(j.error)}</span>`; load(); });
+load();
+</script>{% endblock %}

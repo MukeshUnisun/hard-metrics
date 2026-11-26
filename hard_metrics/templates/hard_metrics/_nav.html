@@ -1,0 +1,25 @@
+<style>
+.hmnav{display:flex;flex-wrap:wrap;gap:.4rem;margin:0 0 1.2rem;align-items:center}
+.hmnav a{padding:.42rem .85rem;border-radius:12px;color:var(--mut);text-decoration:none;border:1px solid transparent;font-size:.9rem}
+.hmnav a:hover{color:var(--tx);border-color:var(--bd)}
+.hmnav a.on{color:var(--tx);background:var(--glass);border-color:var(--bd);box-shadow:inset 0 -2px 0 var(--g1)}
+.hmnav .chip{margin-left:auto;font-size:.8rem;padding:.3rem .7rem;border-radius:999px;border:1px solid var(--bd);display:none;text-decoration:none}
+</style>
+<nav class="hmnav">
+  <a href="{% url 'dashboard' %}" class="{% if page == 'dashboard' %}on{% endif %}"><i class="bi bi-speedometer2"></i> Overview</a>
+  {% if user.is_staff %}
+  <a href="{% url 'projects' %}" class="{% if page == 'projects' %}on{% endif %}"><i class="bi bi-boxes"></i> Projects</a>
+  <a href="{% url 'files' %}" class="{% if page == 'files' %}on{% endif %}"><i class="bi bi-folder2-open"></i> Files</a>
+  <a href="{% url 'databases' %}" class="{% if page == 'databases' %}on{% endif %}"><i class="bi bi-database"></i> Databases</a>
+  <a href="{% url 'backups' %}" class="{% if page == 'backups' %}on{% endif %}"><i class="bi bi-hdd-stack"></i> Backups</a>
+  <a href="{% url 'security' %}" class="{% if page == 'security' %}on{% endif %}"><i class="bi bi-shield-lock"></i> Security</a>
+  <a href="{% url 'audit' %}" class="{% if page == 'audit' %}on{% endif %}"><i class="bi bi-journal-text"></i> Audit log</a>
+  <a href="{% url 'security' %}" class="chip" id="threatChip"></a>
+  {% endif %}
+</nav>
+{% if user.is_staff %}<script>(function(){
+const chip=document.getElementById("threatChip"); if(!chip) return;
+async function go(){ try{ const r=await fetch("/api/security/",{credentials:"same-origin"}); if(!r.ok) return; const d=await r.json();
+  const m={quiet:["#34d399","Quiet"],elevated:["#fbbf24","Elevated risk"],attack:["#f87171","Under attack"]}[d.status]||["#98a2c7","?"];
+  chip.style.display="inline-block"; chip.style.color=m[0]; chip.style.borderColor=m[0]; chip.textContent="● "+m[1]; chip.title=d.message; }catch(e){} }
+go(); setInterval(go,30000); })();</script>{% endif %}

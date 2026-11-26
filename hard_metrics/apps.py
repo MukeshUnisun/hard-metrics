@@ -6,6 +6,7 @@ class HardMetricsConfig(AppConfig):
     name = "hard_metrics"
 
     def ready(self):
+        from . import signals  # noqa: F401  (login audit)
         skip = ("migrate", "makemigrations", "collectstatic", "check", "createsuperuser", "test", "shell")
         if any(a in sys.argv for a in skip):
             return

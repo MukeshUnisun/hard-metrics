@@ -32,3 +32,26 @@ gunicorn config.wsgi:application --bind 127.0.0.1:8000 --workers 1 --threads 4
 ```
 Nginx: `location / { proxy_pass http://127.0.0.1:8000; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto $scheme; auth_basic "Restricted"; auth_basic_user_file /etc/nginx/.htpasswd; }`
 Use 1 worker so the 1-hour history sampler lives in one process.
+
+## v2 pages (staff users only)
+| Page | What it does |
+|---|---|
+| Projects | Docker compose projects and their services, open ports (exposed DB ports flagged), nginx domain to project map |
+| Files | Read-only browser for HM_FILE_ROOTS (/opt, /var/www, /srv, /home). .env secrets are hidden, private keys blocked |
+| Databases | PostgreSQL/MySQL on the host or in Docker: databases, tables, first 50 rows. Read-only, password columns hidden |
+| Backups | List, download and (optional) delete backups from HM_BACKUP_DIRS |
+| Security | SSH brute force and nginx scanner detection, suspicious IP list, one-click block/unblock |
+| Audit log | Logins, failed logins, blocks, deletes, downloads, container actions |
+
+Dangerous actions are OFF by default. Turn on in `hm.env`:
+```
+HM_ENABLE_DOCKER_ACTIONS=True
+HM_ENABLE_BACKUP_DELETE=True
+HM_ENABLE_IP_BLOCK=True
+HM_NEVER_BLOCK=your.office.ip,your.home.ip
+HM_BACKUP_DIRS=/root/backups,/opt/backups
+```
+Blocking uses UFW (or Fail2ban if UFW is inactive). Your own IP, logged-in session IPs and private IPs can never be blocked.
+Docker-published ports bypass UFW, so do not publish DB ports (use `127.0.0.1:5432:5432`).
+
+After updating: `git pull && pip install -r requirements.txt && python manage.py migrate && systemctl restart hardmetrics`

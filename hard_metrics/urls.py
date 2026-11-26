@@ -1,11 +1,30 @@
 from django.urls import path
-from . import views
+from . import views as v
 
 urlpatterns = [
-    path("", views.dashboard, name="dashboard"),
-    path("api/metrics/", views.api_metrics),
-    path("api/system/", views.api_system),
-    path("api/docker/", views.api_docker),
-    path("api/docker/<str:name>/logs/", views.api_container_logs),
-    path("api/docker/<str:name>/<str:action>/", views.api_container_action),
+    path("", v.dashboard, name="dashboard"),
+    path("projects/", v.projects_page, name="projects"),
+    path("files/", v.files_page, name="files"),
+    path("databases/", v.databases_page, name="databases"),
+    path("backups/", v.backups_page, name="backups"),
+    path("security/", v.security_page, name="security"),
+    path("audit/", v.audit_page, name="audit"),
+    path("api/metrics/", v.api_metrics),
+    path("api/system/", v.api_system),
+    path("api/docker/", v.api_docker),
+    path("api/docker/<str:name>/logs/", v.api_container_logs),
+    path("api/docker/<str:name>/<str:action>/", v.api_container_action),
+    path("api/projects/", v.api_projects),
+    path("api/files/", v.api_files),
+    path("api/files/read/", v.api_file_read),
+    path("api/db/targets/", v.api_db_targets),
+    path("api/db/databases/", v.api_db_databases),
+    path("api/db/tables/", v.api_db_tables),
+    path("api/db/preview/", v.api_db_preview),
+    path("api/backups/", v.api_backups),
+    path("api/backups/download/", v.api_backup_download),
+    path("api/backups/delete/", v.api_backup_delete),
+    path("api/security/", v.api_security),
+    path("api/security/ban/", v.api_ban),
+    path("api/security/unban/", v.api_unban),
 ]

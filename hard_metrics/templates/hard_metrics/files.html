@@ -1,0 +1,28 @@
+{% extends "hard_metrics/base.html" %}
+{% block title %}Files{% endblock %}
+{% block content %}
+<div class="glass"><div class="d-flex justify-content-between flex-wrap gap-2 mb-2"><h6 class="m-0">Project files</h6><span class="text-mut small">Read-only. Secret values in .env files are hidden. Private keys cannot be opened.</span></div>
+<div id="crumbs" class="mb-2 small"></div>
+<div class="scroll" style="max-height:65vh"><table class="table align-middle"><thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Mode</th></tr></thead><tbody id="rows"></tbody></table></div></div>
+<div class="modal fade" id="fm" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content" style="background:var(--bg1);color:var(--tx)">
+<div class="modal-header"><h6 class="modal-title" id="ft"></h6><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="fn" class="small text-warning mb-2"></div><pre class="code" id="fb"></pre></div></div></div></div>
+{% endblock %}
+{% block script %}<script>
+const modal = new bootstrap.Modal($("fm"));
+async function load(p){
+  let j; try{ j = await api("/api/files/?path="+encodeURIComponent(p||"")); }catch(e){ j={error:e.message}; }
+  if(j.error){ $("rows").innerHTML=`<tr><td colspan="4" class="text-warning">${esc(j.error)}</td></tr>`; return; }
+  history.replaceState(null,"","?path="+encodeURIComponent(j.path));
+  let acc="", parts=j.path.split("/").filter(Boolean);
+  $("crumbs").innerHTML = `<a href="#" data-p="">Folders</a>` + parts.map(s=>{acc+="/"+s; return ` / <a href="#" data-p="${esc(acc)}">${esc(s)}</a>`}).join("");
+  $("rows").innerHTML = (j.path ? `<tr><td colspan="4"><a href="#" data-p="${esc(j.parent)}"><i class="bi bi-arrow-90deg-up"></i> Up</a></td></tr>` : "") +
+   j.entries.map(e=>`<tr><td>${e.dir?`<i class="bi bi-folder-fill text-warning"></i> <a href="#" data-p="${esc(e.path)}">${esc(e.name)}</a>`:`<i class="bi bi-file-earmark-text"></i> <a href="#" data-f="${esc(e.path)}">${esc(e.name)}</a>`}${e.link?' <span class="badge text-bg-secondary">link</span>':""}</td><td>${e.dir?"":hum(e.size)}</td><td>${esc(e.mtime)}</td><td>${esc(e.mode)}</td></tr>`).join("") || '<tr><td colspan="4" class="text-mut">Empty folder.</td></tr>';
+}
+async function view(p){
+  let j; try{ j = await api("/api/files/read/?path="+encodeURIComponent(p)); }catch(e){ j={error:e.message}; }
+  $("ft").textContent = j.name || p; $("fn").textContent = j.error || (j.masked?"Secret values are hidden. ":"")+(j.truncated?"Showing the first part only.":"");
+  $("fb").textContent = j.error ? "" : j.binary ? "(binary file, "+hum(j.size)+")" : j.text; modal.show();
+}
+document.addEventListener("click", e=>{ const a=e.target.closest("[data-p]"), f=e.target.closest("[data-f]"); if(a){e.preventDefault(); load(a.dataset.p);} if(f){e.preventDefault(); view(f.dataset.f);} });
+load(new URLSearchParams(location.search).get("path")||"");
+</script>{% endblock %}

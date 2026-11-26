@@ -1,0 +1,22 @@
+{% extends "hard_metrics/base.html" %}
+{% block title %}Projects{% endblock %}
+{% block content %}
+<div class="row g-3 mb-3" id="projects"><div class="col-12 text-mut">Loading projects…</div></div>
+<div class="row g-3">
+  <div class="col-lg-6"><div class="glass"><h6>Open ports (what is listening)</h6><div class="scroll"><table class="table align-middle"><thead><tr><th>Port</th><th>Visible to</th><th>Process</th><th>Project</th></tr></thead><tbody id="ports"></tbody></table></div>
+  <div class="small text-mut mt-2">Docker-published ports bypass UFW. A database port marked <span class="text-danger">exposed</span> is reachable from the internet.</div></div></div>
+  <div class="col-lg-6"><div class="glass"><h6>Nginx sites (domain to project)</h6><div class="scroll"><table class="table align-middle"><thead><tr><th>Domain</th><th>Serves</th></tr></thead><tbody id="nginx"></tbody></table></div></div></div>
+</div>
+{% endblock %}
+{% block script %}<script>
+function render(d){
+  $("projects").innerHTML = (d.docker_ok ? "" : `<div class="col-12 text-warning">Docker unavailable: ${esc(d.docker_error)}</div>`) + d.projects.map(p=>`
+  <div class="col-lg-6"><div class="glass h-100"><div class="d-flex justify-content-between align-items-start"><h6 class="mb-1">${esc(p.name)}</h6>${badge(p.running===p.total, p.running+"/"+p.total+" running")}</div>
+  <div class="small text-mut mb-2">${p.workdir ? `<i class="bi bi-folder2-open"></i> ${p.browsable?`<a href="/files/?path=${encodeURIComponent(p.workdir)}">${esc(p.workdir)}</a>`:esc(p.workdir)}` : "Not started with docker compose"}</div>
+  <table class="table align-middle"><tbody>${p.services.map(s=>`<tr><td><b>${esc(s.service||s.name)}</b><div class="small text-mut">${esc(s.name)}</div></td><td class="small">${esc(s.image)}</td><td>${badge(s.status==="running", s.status)}<div class="small text-mut">${esc(s.uptime)}</div></td><td class="small">${s.ports.map(esc).join("<br>")||"-"}</td><td class="small">${s.cpu}%<br>${hum(s.mem_used)}</td></tr>`).join("")}</tbody></table></div></div>`).join("");
+  $("ports").innerHTML = d.listeners.map(l=>`<tr><td><b>${l.port}</b>${l.service?`<div class="small text-mut">${l.service}</div>`:""}</td><td>${l.risk?'<span class="badge text-bg-danger">exposed</span>':l.exposure==="public"?'<span class="badge text-bg-warning">public</span>':'<span class="badge text-bg-secondary">'+l.exposure+'</span>'}</td><td>${esc(l.process)}<div class="small text-mut text-break">${esc(l.cmd)}</div></td><td>${esc(l.project)}${l.container?`<div class="small text-mut">${esc(l.container)}</div>`:""}</td></tr>`).join("") || '<tr><td colspan="4" class="text-mut">No listening ports visible (run as root to see all).</td></tr>';
+  $("nginx").innerHTML = d.nginx.map(n=>`<tr><td><b>${esc(n.names.join(", ")||"(default)")}</b><div class="small text-mut">${n.ssl?"HTTPS":"HTTP"} · ${esc(n.file)}</div></td><td class="small">${n.targets.map(t=>`${esc(t.url)} ${t.project?`<span class="badge text-bg-info">${esc(t.project)}</span>`:""} ${t.container?esc(t.container):esc(t.process)}`).join("<br>") || (n.root?"static: "+esc(n.root):"-")}</td></tr>`).join("") || '<tr><td colspan="2" class="text-mut">No nginx sites found.</td></tr>';
+}
+async function load(){ try{ render(await api("/api/projects/")); }catch(e){ $("projects").innerHTML=`<div class="col-12 text-warning">${esc(e.message)}</div>`; } }
+load(); setInterval(load, 10000);
+</script>{% endblock %}

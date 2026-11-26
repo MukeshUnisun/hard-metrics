@@ -1,0 +1,28 @@
+{% extends "hard_metrics/base.html" %}
+{% block title %}Databases{% endblock %}
+{% block content %}
+<div class="glass mb-3"><div class="d-flex flex-wrap gap-3 align-items-center"><h6 class="m-0">Databases</h6><select id="target" class="form-select form-select-sm" style="max-width:380px"></select><span class="text-mut small">Read-only: only fixed SELECT queries (first 50 rows). Password and token columns are hidden.</span></div></div>
+<div id="err" class="text-warning mb-2"></div>
+<div class="row g-3"><div class="col-lg-3"><div class="glass"><h6>Databases</h6><div id="dbs"></div></div></div>
+<div class="col-lg-4"><div class="glass"><h6>Tables <span id="dbn" class="text-mut small"></span></h6><div class="scroll" id="tbs"><span class="text-mut small">Pick a database.</span></div></div></div>
+<div class="col-lg-5"><div class="glass"><h6>Rows <span id="tn" class="text-mut small"></span></h6><div class="scroll" id="rows"><span class="text-mut small">Pick a table.</span></div></div></div></div>
+{% endblock %}
+{% block script %}<script>
+let T="", DB="";
+const err = m => $("err").textContent = m || "";
+const mark = (box, el) => { box.querySelectorAll(".item").forEach(x=>x.classList.remove("on")); el.classList.add("on"); };
+async function boot(){ const j = await api("/api/db/targets/");
+  $("target").innerHTML = j.targets.map(t=>`<option value="${esc(t.id)}">${esc(t.label)}</option>`).join("");
+  if(!j.targets.length){ err("No PostgreSQL or MySQL found (host client or running Docker database container)."); return; } loadDbs(); }
+async function loadDbs(){ T=$("target").value; err(); $("tbs").innerHTML=""; $("rows").innerHTML=""; $("dbs").innerHTML='<span class="text-mut small">Loading…</span>';
+  const j = await api("/api/db/databases/?target="+encodeURIComponent(T)); if(!j.ok){ $("dbs").innerHTML=""; err(j.error); return; }
+  $("dbs").innerHTML = j.databases.map(d=>`<div class="item" data-db="${esc(d.name)}"><i class="bi bi-database"></i> <b>${esc(d.name)}</b><div class="small text-mut">${hum(d.size)}</div></div>`).join("") || '<span class="text-mut small">No databases.</span>'; }
+async function loadTables(db, el){ DB=db; mark($("dbs"), el); err(); $("dbn").textContent=db; $("rows").innerHTML="";
+  const j = await api(`/api/db/tables/?target=${encodeURIComponent(T)}&db=${encodeURIComponent(db)}`); if(!j.ok){ err(j.error); return; }
+  $("tbs").innerHTML = `<table class="table"><tbody>${j.tables.map(t=>`<tr class="item" data-s="${esc(t.schema)}" data-t="${esc(t.name)}"><td><b>${esc(t.name)}</b><div class="small text-mut">${esc(t.schema)}</div></td><td class="text-end small">${t.rows.toLocaleString()} rows<br>${hum(t.size)}</td></tr>`).join("")}</tbody></table>` || ""; }
+async function loadRows(s, t, el){ mark($("tbs"), el); err(); $("tn").textContent=s+"."+t;
+  const j = await api(`/api/db/preview/?target=${encodeURIComponent(T)}&db=${encodeURIComponent(DB)}&schema=${encodeURIComponent(s)}&table=${encodeURIComponent(t)}`); if(!j.ok){ err(j.error); return; }
+  $("rows").innerHTML = (j.masked.length?`<div class="small text-mut mb-1">Hidden columns: ${j.masked.map(esc).join(", ")}</div>`:"") + `<table class="table"><thead><tr>${j.cols.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${j.rows.map(r=>`<tr>${r.map(v=>`<td class="text-break">${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>`; }
+document.addEventListener("click", e=>{ const d=e.target.closest("[data-db]"), t=e.target.closest("[data-t]"); if(d) loadTables(d.dataset.db, d); if(t) loadRows(t.dataset.s, t.dataset.t, t); });
+$("target").onchange = loadDbs; boot().catch(e=>err(e.message));
+</script>{% endblock %}

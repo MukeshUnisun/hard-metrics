@@ -1,0 +1,59 @@
+{% extends "hard_metrics/base.html" %}
+{% block title %}Security{% endblock %}
+{% block head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>{% endblock %}
+{% block content %}
+<div id="banner" class="glass mb-3"><b>Checking…</b></div>
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3"><div class="glass"><div class="text-mut small">Failed SSH logins (24h)</div><div class="big" id="sFail">-</div></div></div>
+  <div class="col-6 col-lg-3"><div class="glass"><div class="text-mut small">Attacking IPs (SSH)</div><div class="big" id="sIps">-</div></div></div>
+  <div class="col-6 col-lg-3"><div class="glass"><div class="text-mut small">Web requests (24h)</div><div class="big" id="wTot">-</div></div></div>
+  <div class="col-6 col-lg-3"><div class="glass"><div class="text-mut small">Blocked IPs</div><div class="big" id="bCnt">-</div></div></div>
+</div>
+<div class="row g-3 mb-3">
+  <div class="col-lg-8"><div class="glass"><h6>Failed SSH logins per hour</h6><div class="chartbox"><canvas id="cSsh"></canvas></div></div></div>
+  <div class="col-lg-4"><div class="glass"><h6>Website responses (24h)</h6><div class="chartbox"><canvas id="cWeb"></canvas></div></div></div>
+</div>
+<div class="row g-3 mb-3">
+  <div class="col-lg-8"><div class="glass"><h6>Suspicious IPs <span class="text-mut small">(SSH brute force and website scanners)</span></h6><div class="scroll"><table class="table align-middle"><thead><tr><th>IP</th><th>Risk</th><th>What it did</th><th>Last seen</th><th></th></tr></thead><tbody id="threats"></tbody></table></div><div id="msg" class="small mt-2"></div></div></div>
+  <div class="col-lg-4"><div class="glass"><h6>Blocked IPs</h6><div class="scroll"><table class="table align-middle"><tbody id="blocked"></tbody></table></div><div id="ufwNote" class="small text-mut mt-2"></div></div></div>
+</div>
+<div class="row g-3">
+  <div class="col-lg-4"><div class="glass"><h6>Usernames tried on SSH</h6><div id="users" class="small"></div></div></div>
+  <div class="col-lg-4"><div class="glass"><h6>Recent successful SSH logins</h6><div id="logins" class="small"></div></div></div>
+  <div class="col-lg-4"><div class="glass"><h6>Scanner requests seen by nginx</h6><div id="paths" class="small text-break"></div></div></div>
+</div>
+{% endblock %}
+{% block script %}<script>
+const CAN_BLOCK = {{ can_block|yesno:"true,false" }};
+const charts = {}; Chart.defaults.animation = false; Chart.defaults.maintainAspectRatio = false;
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function paint(){ Chart.defaults.color = css("--mut"); Chart.defaults.borderColor = "rgba(128,128,170,.2)"; Object.values(charts).forEach(c=>c.update()); }
+window.onTheme = paint;
+charts.ssh = new Chart($("cSsh"), {type:"bar", data:{labels:[], datasets:[{label:"Failed logins", data:[], backgroundColor:"#f87171"}]}, options:{scales:{y:{beginAtZero:true}}, plugins:{legend:{display:false}}}});
+charts.web = new Chart($("cWeb"), {type:"doughnut", data:{labels:[], datasets:[{data:[], backgroundColor:["#34d399","#22d3ee","#fbbf24","#f87171"], borderWidth:0}]}, options:{cutout:"62%"}});
+const TITLE = {quiet:"All quiet", elevated:"Elevated risk", attack:"Under attack"};
+const LV = {high:"danger", medium:"warning", low:"secondary"};
+function render(d){
+  const colors = {quiet:"var(--ok)", elevated:"var(--warn)", attack:"var(--bad)"};
+  $("banner").innerHTML = `<span class="dot ${d.status==="quiet"?"ok":"bad"} me-2" style="background:${colors[d.status]}"></span><b>${TITLE[d.status]}</b> <span class="text-mut">${esc(d.message)}</span>`;
+  const s = d.ssh, w = d.web;
+  $("sFail").textContent = s.available ? s.failed : "n/a"; $("sIps").textContent = s.available ? s.unique_ips : "n/a";
+  $("wTot").textContent = w.available ? w.total.toLocaleString() : "n/a"; $("bCnt").textContent = d.blocked.length;
+  if(s.available){ charts.ssh.data.labels = s.hourly.map(h=>h.h); charts.ssh.data.datasets[0].data = s.hourly.map(h=>h.n); charts.ssh.update();
+    $("users").innerHTML = s.users.map(u=>`<div class="d-flex justify-content-between"><span>${esc(u[0])}</span><b>${u[1]}</b></div>`).join("") || "No failed logins.";
+    $("logins").innerHTML = s.logins.map(l=>`<div>${esc(l.time)} · <b>${esc(l.user)}</b> from ${esc(l.ip)} <span class="text-mut">(${esc(l.method)})</span></div>`).join("") || "None in 24h."; }
+  else { $("users").innerHTML = $("logins").innerHTML = `<span class="text-warning">Cannot read ${esc(s.path)}. Run as root or set HM_AUTH_LOG.</span>`; }
+  if(w.available){ const k = Object.keys(w.classes).sort(); charts.web.data.labels = k; charts.web.data.datasets[0].data = k.map(x=>w.classes[x]); charts.web.update();
+    $("paths").innerHTML = w.top_paths.map(p=>`<div class="d-flex justify-content-between"><span>${esc(p[0])}</span><b class="ms-2">${p[1]}</b></div>`).join("") || "No scanner requests."; }
+  else { $("paths").innerHTML = `<span class="text-warning">Cannot read ${esc(w.path)}. Set HM_NGINX_LOG.</span>`; }
+  $("threats").innerHTML = d.threats.map(t=>`<tr><td><b>${esc(t.ip)}</b>${t.users.length?`<div class="small text-mut">tried: ${t.users.map(esc).join(", ")}</div>`:""}</td><td><span class="badge text-bg-${LV[t.level]}">${t.level}</span></td><td class="small">${t.reasons.map(esc).join("<br>")}</td><td class="small text-nowrap">${esc(t.last)}</td>
+   <td>${t.banned?'<span class="badge text-bg-success">blocked</span>':t.protected?'<span class="badge text-bg-secondary" title="Your own or private IP">protected</span>':CAN_BLOCK?`<button class="btn btn-sm btn-outline-danger" data-ban="${esc(t.ip)}"><i class="bi bi-slash-circle"></i> Block</button>`:""}</td></tr>`).join("") || '<tr><td colspan="5" class="text-mut">No suspicious IPs in the last 24 hours.</td></tr>';
+  $("blocked").innerHTML = d.blocked.map(b=>`<tr><td><b>${esc(b.ip)}</b><div class="small text-mut">${esc(b.source)}</div></td><td class="text-end">${CAN_BLOCK?`<button class="btn btn-sm btn-outline-secondary" data-unban="${esc(b.ip)}">Unblock</button>`:""}</td></tr>`).join("") || '<tr><td class="text-mut">Nothing blocked.</td></tr>';
+  $("ufwNote").textContent = CAN_BLOCK ? (d.ufw_active ? "Blocks use UFW (note: Docker-published ports can bypass UFW)." : "UFW is inactive, so blocks use Fail2ban (SSH jail).") : "Blocking is off. Set HM_ENABLE_IP_BLOCK=True to enable.";
+}
+async function load(){ try{ render(await api("/api/security/")); }catch(e){ $("banner").innerHTML = `<span class="text-warning">${esc(e.message)}</span>`; } }
+document.addEventListener("click", async e=>{ const b=e.target.closest("[data-ban]"), u=e.target.closest("[data-unban]");
+  if(b){ if(!confirm("Block "+b.dataset.ban+" from this server?")) return; const j = await post("/api/security/ban/", {ip:b.dataset.ban}); $("msg").innerHTML = j.ok ? `<span class="text-success">${esc(j.message)}</span>` : `<span class="text-danger">${esc(j.error)}</span>`; load(); }
+  if(u){ if(!confirm("Unblock "+u.dataset.unban+"?")) return; const j = await post("/api/security/unban/", {ip:u.dataset.unban}); $("msg").innerHTML = j.ok ? `<span class="text-success">${esc(j.message)}</span>` : `<span class="text-danger">${esc(j.error)}</span>`; load(); } });
+paint(); load(); setInterval(load, 30000);
+</script>{% endblock %}
