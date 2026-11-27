@@ -1,13 +1,14 @@
-import os
+import os, shutil, subprocess
 from functools import wraps
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.http import FileResponse, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
+from django.http import FileResponse, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse, StreamingHttpResponse
+from django.utils.http import content_disposition_header
 from django.shortcuts import render
 from django.views.decorators.http import require_GET, require_POST
 
-from . import backups, dbs, files, projects, security, utils
+from . import backups, dbs, files, projects, security, storage, utils
 from .models import AuditLog
 
 
@@ -122,7 +123,7 @@ def api_files(request):
 @require_GET
 def api_file_read(request):
     try:
-        return JsonResponse(files.read_file(request.GET.get("path", "")))
+        return JsonResponse(files.read_file(request.GET.get("path", ""), request.GET.get("tail") == "1"))
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
@@ -162,14 +163,33 @@ def api_backups(request):
     return JsonResponse({"backups": items, "dirs": settings.HM_BACKUP_DIRS, "can_delete": settings.HM_ENABLE_BACKUP_DELETE})
 
 
+def _tar_stream(p):
+    proc = subprocess.Popen(["tar", "-czf", "-", "-C", os.path.dirname(p), os.path.basename(p)], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    try:
+        while True:
+            chunk = proc.stdout.read(1 << 20)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        proc.stdout.close()
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+
+
 @staff_required
 @require_GET
 def api_backup_download(request):
     try:
-        p = backups.safe(request.GET.get("path", ""))
+        p, is_dir = backups.safe(request.GET.get("path", ""))
     except Exception as e:
         return HttpResponseBadRequest(str(e))
     audit(request, "backup_download", p)
+    if is_dir:
+        r = StreamingHttpResponse(_tar_stream(p), content_type="application/gzip")
+        r["Content-Disposition"] = content_disposition_header(True, os.path.basename(p) + ".tar.gz")
+        return r
     return FileResponse(open(p, "rb"), as_attachment=True, filename=os.path.basename(p))
 
 
@@ -179,13 +199,51 @@ def api_backup_delete(request):
     if not settings.HM_ENABLE_BACKUP_DELETE:
         return JsonResponse({"ok": False, "error": "Backup delete is disabled (set HM_ENABLE_BACKUP_DELETE=True)."}, status=403)
     try:
-        p = backups.safe(request.POST.get("path", ""))
-        os.remove(p)
+        p, is_dir = backups.safe(request.POST.get("path", ""))
+        shutil.rmtree(p) if is_dir else os.remove(p)
         audit(request, "backup_delete", p)
         return JsonResponse({"ok": True})
     except Exception as e:
         audit(request, "backup_delete", request.POST.get("path", ""), False, e)
         return JsonResponse({"ok": False, "error": str(e)}, status=400)
+
+
+# ---------------- storage ----------------
+storage_page = _page("storage", "storage")
+
+
+def _force(request):
+    return request.GET.get("force") == "1"
+
+
+@staff_required
+@require_GET
+def api_storage_top(request):
+    return JsonResponse(storage.top(_force(request)))
+
+
+@staff_required
+@require_GET
+def api_storage_scan(request):
+    try:
+        return JsonResponse(storage.scan(request.GET.get("path", "/"), _force(request)))
+    except Exception as e:
+        return JsonResponse({"state": "error", "error": str(e), "result": None}, status=400)
+
+
+@staff_required
+@require_GET
+def api_storage_big(request):
+    try:
+        return JsonResponse(storage.big(request.GET.get("path", "/"), _force(request)))
+    except Exception as e:
+        return JsonResponse({"state": "error", "error": str(e), "result": None}, status=400)
+
+
+@staff_required
+@require_GET
+def api_storage_docker(request):
+    return JsonResponse(storage.docker_usage(_force(request)))
 
 
 # ---------------- security ----------------

@@ -105,12 +105,25 @@ def start_sampler():
     threading.Thread(target=loop, daemon=True, name="hm-sampler").start()
 
 
+def top_processes(n=8):
+    rows = []
+    for p in psutil.process_iter(["pid", "name", "username", "cpu_percent", "memory_percent"]):
+        try:
+            i = p.info
+            rows.append({"pid": i["pid"], "name": i["name"] or "?", "user": i["username"] or "",
+                         "cpu": round(i["cpu_percent"] or 0, 1), "mem": round(i["memory_percent"] or 0, 1)})
+        except Exception:
+            pass
+    rows.sort(key=lambda r: (-r["cpu"], -r["mem"]))
+    return rows[:n]
+
+
 def metrics():
     if not LATEST:
         sample()
         time.sleep(0.3)
         sample()
-    return {**LATEST, "disks": disks(), "history": list(HISTORY),
+    return {**LATEST, "procs": top_processes(), "disks": disks(), "history": list(HISTORY),
             "uptime": int(time.time() - psutil.boot_time()), "ts": datetime.now().strftime("%H:%M:%S")}
 
 
@@ -204,9 +217,15 @@ def backup():
     items = backups.list_backups()
     if not items:
         return {"found": False}
+    limits = {"database": settings.HM_BACKUP_MAX_AGE_HOURS, "media": settings.HM_MEDIA_BACKUP_MAX_AGE_HOURS}
+    kinds = {}
+    for k, lim in limits.items():
+        its = [i for i in items if i["kind"] == k and (i["size"] or i["is_dir"])]
+        kinds[k] = None if not its else {"name": its[0]["name"], "time": its[0]["time"], "size": its[0]["size"] or 0,
+                                         "age_h": its[0]["age_h"], "is_dir": its[0]["is_dir"], "ok": its[0]["age_h"] <= lim}
     n = items[0]
-    ok = n["size"] > 0 and n["age_h"] <= settings.HM_BACKUP_MAX_AGE_HOURS
-    return {"found": True, "timestamp": n["time"], "size": n["size"], "path": n["path"], "code": 0 if ok else 1, "ok": ok}
+    ok = bool(kinds["database"] and kinds["database"]["ok"])
+    return {"found": True, "kinds": kinds, "timestamp": n["time"], "size": n["size"] or 0, "path": n["path"], "code": 0 if ok else 1, "ok": ok}
 
 
 def system_status():

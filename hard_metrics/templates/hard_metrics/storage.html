@@ -1,0 +1,55 @@
+{% extends "hard_metrics/base.html" %}
+{% block title %}Storage{% endblock %}
+{% block head %}<style>.bar{height:8px;border-radius:8px;background:rgba(128,128,170,.25);overflow:hidden}.bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--g1),var(--g2))}.stat{padding:.7rem .9rem;border:1px solid var(--bd);border-radius:12px}</style>{% endblock %}
+{% block content %}
+<div class="glass mb-3"><div class="d-flex flex-wrap justify-content-between gap-2 align-items-center"><h6 class="m-0">Server disk <span class="text-mut small" id="diskTxt"></span></h6><button class="btn btn-sm btn-outline-secondary" id="rescan"><i class="bi bi-arrow-repeat"></i> Rescan all</button></div>
+<div class="bar mt-2" style="height:14px"><i id="diskBar" style="width:0"></i></div><div class="small text-mut mt-1" id="scanNote"></div></div>
+<div class="row g-3 mb-3">
+ <div class="col-lg-6"><div class="glass"><h6>Who is using the storage? <span class="text-mut small">(tracked folders, biggest first. Click to explore)</span></h6><div id="top" class="scroll" style="max-height:520px"><span class="text-mut small">Scanning folders… the first scan can take a minute.</span></div></div></div>
+ <div class="col-lg-6"><div class="glass"><h6>Folder explorer</h6>
+  <div class="d-flex gap-2 mb-2"><input id="path" class="form-control form-control-sm" value="/"><button class="btn btn-sm btn-primary" id="go">Scan</button><a class="btn btn-sm btn-outline-secondary" id="openFiles" href="/files/">Files</a></div>
+  <div id="crumbs" class="small mb-2"></div><div id="exp" class="scroll" style="max-height:400px"><span class="text-mut small">Pick a folder.</span></div></div></div>
+</div>
+<div class="glass mb-3"><div class="d-flex flex-wrap justify-content-between gap-2"><h6>Largest files <span class="text-mut small" id="bigPath"></span></h6><button class="btn btn-sm btn-outline-info" id="bigBtn"><i class="bi bi-search"></i> Find big files in this folder</button></div><div id="big" class="scroll" style="max-height:340px"><span class="text-mut small">Finds files above 50 MB by default (set HM_BIG_FILE_MB).</span></div></div>
+<div class="glass"><div class="d-flex justify-content-between"><h6>Docker storage</h6><button class="btn btn-sm btn-outline-secondary" id="dkRe"><i class="bi bi-arrow-repeat"></i></button></div><div id="dk"><span class="text-mut small">Calculating…</span></div></div>
+{% endblock %}
+{% block script %}<script>
+const KB = kb => hum(kb*1024); let cur = "/";
+const withForce = (u, f) => f ? u + (u.includes("?") ? "&" : "?") + "force=1" : u;
+async function poll(url, render, force){ let j; try{ j = await api(withForce(url, force)); }catch(e){ return render({state:"error", error:e.message}); }
+  render(j); if(j.state==="running" || j.pending>0) setTimeout(()=>poll(url, render, false), 2500); }
+const row = (label, pct, size, attrs) => `<div class="item d-flex align-items-center gap-3" ${attrs||""}><div style="width:40%" class="text-truncate" title="${esc(label)}">${label}</div><div class="bar flex-grow-1"><i style="width:${Math.max(pct,1)}%"></i></div><div class="text-end text-nowrap" style="width:120px">${size}</div></div>`;
+function renderTop(j){ if(j.state==="error"){ $("top").innerHTML=`<span class="text-warning">${esc(j.error)}</span>`; return; }
+  const d=j.disk; $("diskTxt").textContent = `${hum(d.used)} used of ${hum(d.total)} · ${hum(d.free)} free`; $("diskBar").style.width = (d.used/d.total*100)+"%";
+  $("scanNote").textContent = j.pending ? `Scanning ${j.pending} folder(s) in the background at low priority…` : "Scan complete. Results are cached for 15 minutes.";
+  const max = j.items.length ? j.items[0].kb : 1;
+  $("top").innerHTML = j.items.map(i=>row(`<i class="bi bi-${i.dir?"folder-fill text-warning":"files"}"></i> ${esc(i.path)}${i.name==="(loose files)"?" (loose files)":""}`, i.kb/max*100, `<b>${KB(i.kb)}</b> <span class="text-mut small">${(i.kb*1024/d.total*100).toFixed(1)}%</span>`, `data-d="${esc(i.path)}"`)).join("") || '<span class="text-mut small">Scanning folders…</span>'; }
+function renderDir(j){ if(j.state==="error"){ $("exp").innerHTML=`<span class="text-warning">${esc(j.error)}</span>`; return; }
+  const r=j.result; if(!r){ $("exp").innerHTML=`<span class="text-mut small">Scanning ${esc(cur)}… large folders can take a minute.</span>`; return; }
+  if(r.path!==cur) return;
+  let acc=""; $("crumbs").innerHTML = `<a href="#" data-d="/">/</a>` + r.path.split("/").filter(Boolean).map(s=>{acc+="/"+s; return ` <span class="text-mut">/</span> <a href="#" data-d="${esc(acc)}">${esc(s)}</a>`}).join("");
+  $("exp").innerHTML = `<div class="mb-2"><b>${KB(r.total_kb)}</b> <span class="text-mut small">in ${esc(r.path)}${r.partial?" (partial: scan timed out or some folders unreadable)":""}${j.state==="running"?" · refreshing…":""}</span></div>` +
+    r.children.map(c=>row(`<i class="bi bi-${c.dir?"folder-fill text-warning":"file-earmark"}"></i> ${esc(c.name)}`, c.pct, `<b>${KB(c.kb)}</b> <span class="text-mut small">${c.pct}%</span>`, c.dir?`data-d="${esc(c.path)}"`:"")).join("") +
+    (r.loose_kb>0.5 ? row('<i class="bi bi-files"></i> (files directly in this folder)', r.loose_kb/r.total_kb*100, `<b>${KB(r.loose_kb)}</b>`) : ""); }
+function loadDir(p, force){ cur = (p||"/").replace(/\/+$/,"") || "/"; $("path").value = cur; $("openFiles").href = "/files/?path="+encodeURIComponent(cur); $("bigPath").textContent = "in "+cur;
+  poll("/api/storage/scan/?path="+encodeURIComponent(cur), renderDir, force); }
+function renderBig(j){ if(j.state==="error"){ $("big").innerHTML=`<span class="text-warning">${esc(j.error)}</span>`; return; } const r=j.result;
+  if(!r){ $("big").innerHTML='<span class="text-mut small">Searching…</span>'; return; }
+  $("big").innerHTML = r.files.length ? `<table class="table"><thead><tr><th>Size</th><th>Modified</th><th>File</th></tr></thead><tbody>${r.files.map(f=>`<tr><td class="text-nowrap"><b>${hum(f.size)}</b></td><td>${esc(f.mtime)}</td><td class="text-break"><a href="/files/?path=${encodeURIComponent(f.path.replace(/\/[^\/]*$/,"")||"/")}">${esc(f.path)}</a></td></tr>`).join("")}</tbody></table>` : `<span class="text-mut small">No files above ${r.min_mb} MB in ${esc(r.path)}.</span>`; }
+const stat = (l, v) => `<div class="col-6 col-lg"><div class="stat"><div class="text-mut small">${l}</div><div class="fw-bold">${hum(v)}</div></div></div>`;
+function renderDocker(j){ if(j.state==="error"){ $("dk").innerHTML=`<span class="text-warning">Docker unavailable: ${esc(j.error)}</span>`; return; } const r=j.result;
+  if(!r){ $("dk").innerHTML='<span class="text-mut small">Calculating Docker usage…</span>'; return; }
+  const tbl = (h, rows) => `<div class="col-lg-6"><div class="text-mut small mb-1">${h}</div><div class="scroll" style="max-height:260px"><table class="table"><tbody>${rows||'<tr><td class="text-mut">none</td></tr>'}</tbody></table></div></div>`;
+  $("dk").innerHTML = `<div class="row g-2 mb-3">${stat("Images",r.images)}${stat("Container layers",r.containers)}${stat("Volumes",r.volumes)}${stat("Build cache",r.build_cache)}<div class="col-6 col-lg"><div class="stat"><div class="text-mut small">Reclaimable</div><div class="fw-bold text-warning">${hum(r.reclaimable)}</div></div></div></div>
+  <div class="row g-3">${tbl("By compose project (volumes + container layers)", r.projects.map(p=>`<tr><td><b>${esc(p.name)}</b></td><td class="text-end">${hum(p.size)}</td></tr>`).join(""))}
+  ${tbl("Biggest volumes", r.volume_list.map(v=>`<tr><td class="text-break">${esc(v.name)}<div class="small text-mut">${esc(v.project)} ${v.in_use?"":'<span class="badge text-bg-warning">unused</span>'}</div></td><td class="text-end">${hum(v.size)}</td></tr>`).join(""))}
+  ${tbl("Biggest container layers", r.container_list.map(c=>`<tr><td>${esc(c.name)}<div class="small text-mut">${esc(c.state)}</div></td><td class="text-end">${hum(c.rw)}</td></tr>`).join(""))}
+  ${tbl("Biggest images", r.image_list.map(i=>`<tr><td class="text-break">${esc(i.name)} ${i.unused?'<span class="badge text-bg-warning">unused</span>':""}</td><td class="text-end">${hum(i.size)}</td></tr>`).join(""))}</div>
+  <div class="small text-mut mt-2">Unused images and build cache can be freed from the server shell with <code>docker image prune -a</code> and <code>docker builder prune</code>. Review before running.</div>`; }
+document.addEventListener("click", e=>{ const d=e.target.closest("[data-d]"); if(d){ e.preventDefault(); loadDir(d.dataset.d, false); window.scrollTo({top:document.getElementById("exp").offsetTop-120, behavior:"smooth"}); } });
+$("go").onclick = () => loadDir($("path").value, true); $("path").onkeydown = e => { if(e.key==="Enter") $("go").click(); };
+$("bigBtn").onclick = () => { $("big").innerHTML='<span class="text-mut small">Searching…</span>'; poll("/api/storage/big/?path="+encodeURIComponent(cur), renderBig, false); };
+$("rescan").onclick = () => { poll("/api/storage/top/?x=1", renderTop, true); };
+$("dkRe").onclick = () => poll("/api/storage/docker/?x=1", renderDocker, true);
+poll("/api/storage/top/?x=1", renderTop, false); loadDir(new URLSearchParams(location.search).get("path")||"/", false); poll("/api/storage/docker/?x=1", renderDocker, false);
+</script>{% endblock %}

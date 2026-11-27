@@ -66,10 +66,16 @@ HM_SAMPLE_SECONDS = 5
 # ---------------- v2: files, databases, backups, security ----------------
 HM_BACKUP_DIRS = [d for d in env("HM_BACKUP_DIRS", "/root/backups,/opt/backups,/opt/docker/backups,/var/backups").split(",") if d]
 HM_BACKUP_EXTS = (".sql", ".sql.gz", ".gz", ".tar", ".tgz", ".tar.gz", ".zip", ".dump", ".bak", ".7z", ".bz2", ".xz", ".rdb")
-HM_FILE_ROOTS = [d for d in env("HM_FILE_ROOTS", "/opt,/var/www,/srv,/home").split(",") if d]  # file browser is read-only and limited to these
+HM_FILE_ROOTS = [d for d in env("HM_FILE_ROOTS", "/").split(",") if d]  # file browser is read-only and ; / = whole server, /proc /sys /dev are always blocked
 HM_FILE_MAX_VIEW = 512 * 1024
 HM_ENABLE_BACKUP_DELETE = env("HM_ENABLE_BACKUP_DELETE", "False") == "True"
 HM_ENABLE_IP_BLOCK = env("HM_ENABLE_IP_BLOCK", "False") == "True"
 HM_NEVER_BLOCK = [i for i in env("HM_NEVER_BLOCK", "").split(",") if i]  # IPs that can never be blocked
 HM_AUTH_LOG = env("HM_AUTH_LOG", "/var/log/auth.log")
 HM_NGINX_LOG = env("HM_NGINX_LOG", "/var/log/nginx/access.log")
+
+# ---------------- v3: storage analyzer, media backups ----------------
+HM_DU_ROOTS = [d for d in env("HM_DU_ROOTS", "/opt,/opt/docker,/var/www,/var/lib/docker,/var/backups,/var/log,/root,/home,/srv").split(",") if d]
+HM_DU_TIMEOUT = 240            # seconds per `du` scan (runs with nice/ionice, so it will not slow your apps)
+HM_BIG_FILE_MB = 50            # "largest files" finder threshold
+HM_MEDIA_BACKUP_MAX_AGE_HOURS = 48

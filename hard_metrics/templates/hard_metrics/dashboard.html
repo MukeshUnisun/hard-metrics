@@ -41,6 +41,7 @@ pre.logs{height:60vh;overflow:auto;background:#05070f;color:#b6f5c9;padding:1rem
 </div>
 
 {% include "hard_metrics/_nav.html" %}
+<div id="alerts" class="glass mb-3" style="padding:.8rem 1.1rem"><span class="text-mut small">Checking health…</span></div>
 <div class="row g-3 mb-3">
   <div class="col-6 col-xl-3"><div class="glass d-flex align-items-center gap-3"><div class="ring" id="ringCpu"><span id="cpuV">0%</span></div><div><div class="text-mut small">CPU</div><div class="big" id="cpuCores">–</div><div class="text-mut small" id="cpuTemp"></div></div></div></div>
   <div class="col-6 col-xl-3"><div class="glass d-flex align-items-center gap-3"><div class="ring" id="ringRam"><span id="ramV">0%</span></div><div><div class="text-mut small">Memory</div><div class="big" id="ramUsed">–</div><div class="text-mut small" id="ramSub"></div></div></div></div>
@@ -58,6 +59,10 @@ pre.logs{height:60vh;overflow:auto;background:#05070f;color:#b6f5c9;padding:1rem
   <div class="col-lg-7"><div class="glass"><h6>CPU per core</h6><div id="cores" class="row g-2"></div></div></div>
 </div>
 
+<div class="row g-3 mb-3">
+  {% if user.is_staff %}<div class="col-lg-7"><div class="glass"><div class="d-flex justify-content-between"><h6>Who is using the disk?</h6><a class="small" href="{% url 'storage' %}" style="color:var(--g2)">Open storage analyzer</a></div><div id="storageBox" class="small text-mut">Scanning folders… the first scan can take a minute.</div></div></div>{% endif %}
+  <div class="col-lg-{% if user.is_staff %}5{% else %}12{% endif %}"><div class="glass"><h6>Top processes</h6><table class="table align-middle"><thead><tr><th>Process</th><th>User</th><th>CPU</th><th>RAM</th></tr></thead><tbody id="procRows"></tbody></table></div></div>
+</div>
 <div class="row g-3 mb-3">
   <div class="col-lg-7"><div class="glass"><h6>Services</h6><div id="services" class="row g-2"></div></div></div>
   <div class="col-lg-5"><div class="glass"><h6>Backups</h6><div id="backup" class="small"></div></div></div>
@@ -129,9 +134,10 @@ const badge = (ok, t) => `<span class="badge text-bg-${ok===null?"secondary":ok?
 function renderSystem(d){
   $("services").innerHTML = d.services.map(s=>`<div class="col-6 col-md-4"><div class="svc"><span class="dot ${s.state}"></span><div><div class="small fw-semibold">${esc(s.name)}</div><div class="small text-mut">${s.state}</div></div></div></div>`).join("");
   const b = d.backup;
+  const brow = (label, k) => !k ? `<div class="mb-2"><span class="dot bad"></span> <b>${label}</b> <span class="text-mut">none found</span></div>` : `<div class="mb-2"><span class="dot ${k.ok?"ok":"bad"}"></span> <b>${label}</b> <span class="text-mut">${k.age_h<48?Math.round(k.age_h)+" h":Math.round(k.age_h/24)+" days"} ago · ${k.is_dir?"folder":hum(k.size)}</span><div class="small text-break text-mut">${esc(k.name)}</div></div>`;
   $("backup").innerHTML = !b.found ? '<span class="text-mut">No backup found. Set HM_BACKUP_DIRS or HM_BACKUP_STATUS_FILE.</span>' :
-    `<div class="d-flex align-items-center gap-2 mb-2"><span class="dot ${b.ok?"ok":"bad"}"></span><b>${b.ok?"Last backup succeeded":"Backup needs attention"}</b> <span class="text-mut">(code ${b.code})</span></div>
-     <div>Time: ${esc(b.timestamp)}</div><div>Size: ${hum(b.size)}</div><div class="text-break">Path: ${esc(b.path)}</div>`;
+    b.kinds ? brow("Database", b.kinds.database) + brow("Media", b.kinds.media) + '<a class="small" href="/backups/" style="color:var(--g2)">All backups</a>' :
+    `<div class="d-flex align-items-center gap-2 mb-2"><span class="dot ${b.ok?"ok":"bad"}"></span><b>${b.ok?"Last backup succeeded":"Backup needs attention"}</b> <span class="text-mut">(code ${b.code})</span></div><div>Time: ${esc(b.timestamp)}</div><div>Size: ${hum(b.size)}</div><div class="text-break">Path: ${esc(b.path)}</div>`;
   const f = d.fail2ban;
   $("f2b").innerHTML = !f.available ? `<span class="text-warning">Fail2ban data unavailable: ${esc(f.error)}</span>` :
     `<div class="mb-2">Banned now: <b>${f.banned_now}</b> · Total failed attempts: <b>${f.total_failed}</b></div>` +
@@ -150,6 +156,33 @@ function renderDocker(d){
   const run = d.containers.filter(c=>c.status==="running"), B = charts.bar.data;
   B.labels = run.map(c=>c.name); B.datasets[0].data = run.map(c=>c.cpu); B.datasets[1].data = run.map(c=>c.mem_pct); charts.bar.update();
 }
+
+// ---- alerts, processes, storage ----
+const ST = {m:null, s:null, d:null};
+function renderProcs(p){ $("procRows").innerHTML = (p||[]).map(x=>`<tr><td><b>${esc(x.name)}</b> <span class="text-mut small">${x.pid}</span></td><td class="small">${esc(x.user)}</td><td>${x.cpu}%</td><td>${x.mem}%</td></tr>`).join(""); }
+function renderAlerts(){ const A=[], add=(lv,t)=>A.push({lv,t}), m=ST.m, s=ST.s, d=ST.d;
+  if(m){ m.disks.forEach(k=>{ if(k.percent>=95) add("bad",`Disk ${k.mount} is ${k.percent}% full`); else if(k.percent>=85) add("warn",`Disk ${k.mount} is ${k.percent}% full`); if(k.inode_percent>=85) add("warn",`Inodes on ${k.mount} are ${k.inode_percent}% used`); });
+    if(m.memory.percent>=90) add("bad",`RAM is ${m.memory.percent}% used`); else if(m.memory.percent>=80) add("warn",`RAM is ${m.memory.percent}% used`);
+    if(m.cpu.load[1] > m.cpu.cores*1.5) add("warn",`Load average is high (${m.cpu.load[1]} on ${m.cpu.cores} cores)`); }
+  if(s){ s.services.forEach(x=>{ if(x.state==="failed") add("bad",`${x.name} has failed`); else if(x.state==="inactive") add("warn",`${x.name} is not running`); });
+    const b=s.backup; if(!b.found) add("warn","No backup found");
+    else if(b.kinds){ [["database","Database"],["media","Media"]].forEach(([k,l])=>{ const x=b.kinds[k]; if(!x) add("warn",`No ${l.toLowerCase()} backup found`); else if(!x.ok) add("warn",`${l} backup is old (${Math.round(x.age_h)} h)`); }); } else if(!b.ok) add("warn","Backup needs attention");
+    s.env.forEach(e=>{ if(!e.perm_ok) add("warn",`${e.path} permissions are ${e.mode} (should be 600)`); if(e.debug_ok===false) add("bad",`${e.path} has DEBUG=True`); });
+    if(!s.fail2ban.available) add("warn","Fail2ban status unavailable"); }
+  if(d){ if(!d.available) add("warn","Docker unavailable"); else d.containers.filter(c=>c.status!=="running").forEach(c=>add("warn",`Container ${c.name} is ${c.status}`)); }
+  A.sort((a,b)=>(a.lv==="bad"?0:1)-(b.lv==="bad"?0:1));
+  $("alerts").innerHTML = A.length ? `<div class="fw-semibold mb-1">Health alerts (${A.length})</div>` + A.map(a=>`<div class="d-flex align-items-start gap-2 py-1 small"><span class="dot ${a.lv==="bad"?"failed":"inactive"} mt-1"></span><span>${esc(a.t)}</span></div>`).join("") : '<span class="dot active me-2"></span><b>All systems healthy</b>'; }
+{ const rm=renderMetrics, rs=renderSystem, rd=renderDocker;
+  renderMetrics = d => { rm(d); ST.m=d; renderProcs(d.procs); renderAlerts(); };
+  renderSystem = d => { rs(d); ST.s=d; renderAlerts(); };
+  renderDocker = d => { rd(d); ST.d=d; renderAlerts(); }; }
+async function loadStorage(){ const box=$("storageBox"); if(!box) return; let wait=60000;
+  try{ const r = await fetch("/api/storage/top/",{credentials:"same-origin"}); if(!r.ok){ box.closest(".col-lg-7").style.display="none"; return; } const j = await r.json();
+    const max = j.items.length ? j.items[0].kb : 1; wait = j.pending ? 4000 : 60000;
+    box.innerHTML = (j.items.slice(0,8).map(i=>`<div class="mb-2"><div class="d-flex justify-content-between"><a href="/storage/?path=${encodeURIComponent(i.path)}" style="color:var(--tx)" class="text-truncate">${esc(i.path)}</a><b>${hum(i.kb*1024)}</b></div><div class="bar"><i style="width:${Math.max(i.kb/max*100,1)}%"></i></div></div>`).join("") || "Scanning folders…") +
+      `<div class="text-mut mt-1">${hum(j.disk.used)} used of ${hum(j.disk.total)}${j.pending?" · scanning…":""}</div>`;
+  }catch(e){ wait=30000; } setTimeout(loadStorage, wait); }
+loadStorage();
 
 // ---- polling ----
 async function pull(url, fn){ try{ const r = await fetch(url, {credentials:"same-origin"}); if(r.status===403||r.redirected){location.reload();return;} fn(await r.json()); }catch(e){ console.warn(url, e); } }

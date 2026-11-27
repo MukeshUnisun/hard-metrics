@@ -55,3 +55,9 @@ Blocking uses UFW (or Fail2ban if UFW is inactive). Your own IP, logged-in sessi
 Docker-published ports bypass UFW, so do not publish DB ports (use `127.0.0.1:5432:5432`).
 
 After updating: `git pull && pip install -r requirements.txt && python manage.py migrate && systemctl restart hardmetrics`
+
+## v3 additions
+- **Files**: now browses the whole server (`/`). `/proc`, `/sys`, `/dev` are blocked; keys, shadow files and shell histories cannot be opened; .env secrets are hidden. Large logs: "End of file" button shows the latest lines. Limit with `HM_FILE_ROOTS=/opt,/var/www` if you want less access.
+- **Backups**: three types (Database, Media, Other archives), search and type filter. Media folders (names like media, uploads, assets, files) are listed as folders and downloaded as .tar.gz. Overview shows latest DB and latest media backup separately. `HM_MEDIA_BACKUP_MAX_AGE_HOURS=48`.
+- **Storage** page: who uses the disk (du-based, runs at low priority in the background, cached 15 min), folder explorer with drill-down, largest-files finder, Docker usage (images, volumes, containers, build cache, reclaimable). Tracked folders: `HM_DU_ROOTS=/opt,/opt/docker,/var/www,/var/backups,/var/log,/root,/home` and `HM_BIG_FILE_MB=50`.
+- **Overview**: health alerts (disk, RAM, load, failed services, stopped containers, old backups, bad .env permissions), top processes, top storage consumers.

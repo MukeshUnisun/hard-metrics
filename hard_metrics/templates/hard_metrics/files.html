@@ -1,28 +1,35 @@
 {% extends "hard_metrics/base.html" %}
 {% block title %}Files{% endblock %}
 {% block content %}
-<div class="glass"><div class="d-flex justify-content-between flex-wrap gap-2 mb-2"><h6 class="m-0">Project files</h6><span class="text-mut small">Read-only. Secret values in .env files are hidden. Private keys cannot be opened.</span></div>
-<div id="crumbs" class="mb-2 small"></div>
+<div class="glass"><div class="d-flex justify-content-between flex-wrap gap-2 mb-2"><h6 class="m-0">File explorer</h6><span class="text-mut small">Read-only. Secret values in .env files are hidden. Private keys, shadow files and shell histories are blocked.</span></div>
+<div class="d-flex flex-wrap gap-1 mb-2" id="quick"></div>
+<div class="d-flex flex-wrap gap-2 align-items-center mb-2"><div id="crumbs" class="small flex-grow-1"></div><input id="flt" class="form-control form-control-sm" style="max-width:220px" placeholder="Filter this folder…"></div>
 <div class="scroll" style="max-height:65vh"><table class="table align-middle"><thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Mode</th></tr></thead><tbody id="rows"></tbody></table></div></div>
 <div class="modal fade" id="fm" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content" style="background:var(--bg1);color:var(--tx)">
-<div class="modal-header"><h6 class="modal-title" id="ft"></h6><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="fn" class="small text-warning mb-2"></div><pre class="code" id="fb"></pre></div></div></div></div>
+<div class="modal-header"><h6 class="modal-title" id="ft"></h6><div class="btn-group btn-group-sm me-3" id="fbtn" style="display:none"><button class="btn btn-outline-secondary" data-t="0">Start of file</button><button class="btn btn-outline-secondary" data-t="1">End of file (latest log lines)</button></div><button class="btn-close" data-bs-dismiss="modal"></button></div>
+<div class="modal-body"><div id="fn" class="small text-warning mb-2"></div><pre class="code" id="fb"></pre></div></div></div></div>
 {% endblock %}
 {% block script %}<script>
-const modal = new bootstrap.Modal($("fm"));
+const modal = new bootstrap.Modal($("fm")); let curFile = "", entries = [];
+const QUICK = ["/", "/opt", "/opt/docker", "/var/www", "/var/log", "/var/backups", "/etc", "/root", "/home", "/srv", "/tmp"];
+$("quick").innerHTML = QUICK.map(q=>`<button class="btn btn-sm btn-outline-secondary" data-p="${q}">${q}</button>`).join("");
+function draw(){ const f = $("flt").value.toLowerCase(); const list = entries.filter(e=>e.name.toLowerCase().includes(f));
+  $("rows").innerHTML = list.map(e=>`<tr><td>${e.dir?`<i class="bi bi-folder-fill text-warning"></i> <a href="#" data-p="${esc(e.path)}">${esc(e.name)}</a>`:`<i class="bi bi-file-earmark-text"></i> <a href="#" data-f="${esc(e.path)}">${esc(e.name)}</a>`}${e.link?' <span class="badge text-bg-secondary">link</span>':""}</td><td>${e.dir?"":hum(e.size)}</td><td>${esc(e.mtime)}</td><td>${esc(e.mode)}</td></tr>`).join("") || '<tr><td colspan="4" class="text-mut">Nothing here.</td></tr>'; }
 async function load(p){
   let j; try{ j = await api("/api/files/?path="+encodeURIComponent(p||"")); }catch(e){ j={error:e.message}; }
   if(j.error){ $("rows").innerHTML=`<tr><td colspan="4" class="text-warning">${esc(j.error)}</td></tr>`; return; }
-  history.replaceState(null,"","?path="+encodeURIComponent(j.path));
+  history.replaceState(null,"","?path="+encodeURIComponent(j.path)); $("flt").value="";
   let acc="", parts=j.path.split("/").filter(Boolean);
-  $("crumbs").innerHTML = `<a href="#" data-p="">Folders</a>` + parts.map(s=>{acc+="/"+s; return ` / <a href="#" data-p="${esc(acc)}">${esc(s)}</a>`}).join("");
-  $("rows").innerHTML = (j.path ? `<tr><td colspan="4"><a href="#" data-p="${esc(j.parent)}"><i class="bi bi-arrow-90deg-up"></i> Up</a></td></tr>` : "") +
-   j.entries.map(e=>`<tr><td>${e.dir?`<i class="bi bi-folder-fill text-warning"></i> <a href="#" data-p="${esc(e.path)}">${esc(e.name)}</a>`:`<i class="bi bi-file-earmark-text"></i> <a href="#" data-f="${esc(e.path)}">${esc(e.name)}</a>`}${e.link?' <span class="badge text-bg-secondary">link</span>':""}</td><td>${e.dir?"":hum(e.size)}</td><td>${esc(e.mtime)}</td><td>${esc(e.mode)}</td></tr>`).join("") || '<tr><td colspan="4" class="text-mut">Empty folder.</td></tr>';
+  $("crumbs").innerHTML = `<a href="#" data-p="/">/</a>` + parts.map(s=>{acc+="/"+s; return ` <span class="text-mut">/</span> <a href="#" data-p="${esc(acc)}">${esc(s)}</a>`}).join("");
+  entries = (j.parent !== null ? [{name:"..  (up)", path:j.parent===""?"":j.parent, dir:true, size:0, mtime:"", mode:""}] : []).concat(j.entries); draw();
 }
-async function view(p){
-  let j; try{ j = await api("/api/files/read/?path="+encodeURIComponent(p)); }catch(e){ j={error:e.message}; }
-  $("ft").textContent = j.name || p; $("fn").textContent = j.error || (j.masked?"Secret values are hidden. ":"")+(j.truncated?"Showing the first part only.":"");
-  $("fb").textContent = j.error ? "" : j.binary ? "(binary file, "+hum(j.size)+")" : j.text; modal.show();
-}
-document.addEventListener("click", e=>{ const a=e.target.closest("[data-p]"), f=e.target.closest("[data-f]"); if(a){e.preventDefault(); load(a.dataset.p);} if(f){e.preventDefault(); view(f.dataset.f);} });
+async function view(p, tail){ curFile = p;
+  let j; try{ j = await api("/api/files/read/?path="+encodeURIComponent(p)+(tail?"&tail=1":"")); }catch(e){ j={error:e.message}; }
+  $("ft").textContent = j.name || p; $("fbtn").style.display = j.truncated ? "" : "none";
+  $("fn").textContent = j.error || (j.masked?"Secret values are hidden. ":"")+(j.truncated?(j.tail?"Showing the end of the file.":"Showing the start of the file only (file is "+hum(j.size)+")."):"");
+  $("fb").textContent = j.error ? "" : j.binary ? "(binary file, "+hum(j.size)+")" : j.text; modal.show(); if(tail) $("fb").scrollTop = $("fb").scrollHeight; }
+document.addEventListener("click", e=>{ const a=e.target.closest("[data-p]"), f=e.target.closest("[data-f]"), t=e.target.closest("#fbtn [data-t]");
+  if(a){ e.preventDefault(); load(a.dataset.p); } if(f){ e.preventDefault(); view(f.dataset.f, false); } if(t) view(curFile, t.dataset.t==="1"); });
+$("flt").oninput = draw;
 load(new URLSearchParams(location.search).get("path")||"");
 </script>{% endblock %}

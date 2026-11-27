@@ -2,26 +2,37 @@
 {% block title %}Backups{% endblock %}
 {% block content %}
 <div class="row g-3 mb-3">
-  <div class="col-6 col-lg-3"><div class="glass"><div class="text-mut small">Backup files</div><div class="big" id="cnt">-</div></div></div>
-  <div class="col-6 col-lg-3"><div class="glass"><div class="text-mut small">Total size</div><div class="big" id="tot">-</div></div></div>
-  <div class="col-6 col-lg-3"><div class="glass"><div class="text-mut small">Newest backup</div><div class="big" id="new">-</div></div></div>
+  <div class="col-6 col-lg-3"><div class="glass"><div class="text-mut small">Backups found</div><div class="big" id="cnt">-</div><div class="small text-mut" id="tot"></div></div></div>
+  <div class="col-6 col-lg-3"><div class="glass"><div class="text-mut small">Latest database backup</div><div class="big" id="ldb">-</div></div></div>
+  <div class="col-6 col-lg-3"><div class="glass"><div class="text-mut small">Latest media backup</div><div class="big" id="lmed">-</div></div></div>
   <div class="col-6 col-lg-3"><div class="glass"><div class="text-mut small">Folders watched</div><div class="small" id="dirs"></div></div></div>
 </div>
-<div class="glass"><h6>Backup files {% if not can_delete %}<span class="text-mut small">(delete is off. Set HM_ENABLE_BACKUP_DELETE=True to enable)</span>{% endif %}</h6>
-<div class="scroll" style="max-height:60vh"><table class="table align-middle"><thead><tr><th>File</th><th>Size</th><th>Created</th><th>Age</th><th></th></tr></thead><tbody id="rows"></tbody></table></div><div id="msg" class="small mt-2"></div></div>
+<div class="glass"><div class="d-flex flex-wrap gap-2 align-items-center mb-2"><h6 class="m-0 me-2">Backups</h6>
+<div class="btn-group btn-group-sm" id="chips"><button class="btn btn-outline-secondary active" data-k="">All</button><button class="btn btn-outline-secondary" data-k="database">Database</button><button class="btn btn-outline-secondary" data-k="media">Media</button><button class="btn btn-outline-secondary" data-k="archive">Other archives</button></div>
+<input id="q" class="form-control form-control-sm" style="max-width:220px" placeholder="Search…">
+<span class="text-mut small">{% if not can_delete %}Delete is off (HM_ENABLE_BACKUP_DELETE=True to enable). {% endif %}Media folders are downloaded as .tar.gz.</span></div>
+<div class="scroll" style="max-height:62vh"><table class="table align-middle"><thead><tr><th>Backup</th><th>Type</th><th>Size</th><th>Created</th><th>Age</th><th></th></tr></thead><tbody id="rows"></tbody></table></div><div id="msg" class="small mt-2"></div></div>
 {% endblock %}
 {% block script %}<script>
 const CAN_DELETE = {{ can_delete|yesno:"true,false" }};
 const age = h => h < 1 ? "just now" : h < 48 ? Math.round(h)+" h" : Math.round(h/24)+" days";
-async function load(){ try{ const j = await api("/api/backups/");
-  $("cnt").textContent = j.backups.length; $("tot").textContent = hum(j.backups.reduce((a,b)=>a+b.size,0));
-  $("new").textContent = j.backups.length ? age(j.backups[0].age_h) : "none"; $("dirs").innerHTML = j.dirs.map(esc).join("<br>");
-  $("rows").innerHTML = j.backups.map(b=>`<tr><td class="text-break"><b>${esc(b.name)}</b><div class="small text-mut">${esc(b.dir)}</div></td><td>${b.size?hum(b.size):'<span class="text-danger">0 B (empty)</span>'}</td><td>${esc(b.time)}</td><td>${age(b.age_h)}</td>
+const KIND = {database:["info","Database"], media:["warning","Media"], archive:["secondary","Archive"]};
+let ALL = [], K = "";
+function draw(){ const q = $("q").value.toLowerCase(); const list = ALL.filter(b=>(!K||b.kind===K) && (b.name+b.dir).toLowerCase().includes(q));
+  $("rows").innerHTML = list.map(b=>`<tr><td class="text-break">${b.is_dir?'<i class="bi bi-folder-fill text-warning"></i> ':""}<b>${esc(b.name)}</b><div class="small text-mut">${esc(b.dir)}</div></td><td><span class="badge text-bg-${KIND[b.kind][0]}">${b.is_dir?"Media folder":KIND[b.kind][1]}</span></td>
+   <td>${b.size===null?'<span class="text-mut">large folder</span>':b.size?hum(b.size):'<span class="text-danger">0 B (empty)</span>'}</td><td>${esc(b.time)}</td><td>${age(b.age_h)}</td>
    <td class="text-nowrap"><a class="btn btn-sm btn-outline-info" href="/api/backups/download/?path=${encodeURIComponent(b.path)}"><i class="bi bi-download"></i> Download</a>
-   ${CAN_DELETE?`<button class="btn btn-sm btn-outline-danger ms-1" data-del="${esc(b.path)}" data-n="${esc(b.name)}"><i class="bi bi-trash"></i></button>`:""}</td></tr>`).join("") || '<tr><td colspan="5" class="text-mut">No backup files found. Put backups in one of the watched folders (HM_BACKUP_DIRS).</td></tr>';
- }catch(e){ $("msg").textContent = e.message; } }
-document.addEventListener("click", async e=>{ const b=e.target.closest("[data-del]"); if(!b) return;
-  if(prompt(`Delete backup permanently?\nType the file name to confirm:\n${b.dataset.n}`) !== b.dataset.n) return;
+   ${CAN_DELETE?`<button class="btn btn-sm btn-outline-danger ms-1" data-del="${esc(b.path)}" data-n="${esc(b.name)}"><i class="bi bi-trash"></i></button>`:""}</td></tr>`).join("") || '<tr><td colspan="6" class="text-mut">No backups match. Check the watched folders (HM_BACKUP_DIRS).</td></tr>'; }
+async function load(){ try{ const j = await api("/api/backups/"); ALL = j.backups;
+  $("cnt").textContent = ALL.length; $("tot").textContent = hum(ALL.reduce((a,b)=>a+(b.size||0),0))+" total";
+  const last = k => ALL.find(b=>b.kind===k && (b.size||b.is_dir));
+  const set = (id,b,max) => { $(id).innerHTML = b ? `${age(b.age_h)}${b.age_h>max?' <i class="bi bi-exclamation-triangle text-warning"></i>':""}` : '<span class="text-warning">none</span>'; };
+  set("ldb", last("database"), 26); set("lmed", last("media"), 48);
+  $("dirs").innerHTML = j.dirs.map(esc).join("<br>"); draw(); }catch(e){ $("msg").textContent = e.message; } }
+document.addEventListener("click", async e=>{
+  const c=e.target.closest("#chips [data-k]"); if(c){ K=c.dataset.k; document.querySelectorAll("#chips .btn").forEach(x=>x.classList.toggle("active",x===c)); draw(); return; }
+  const b=e.target.closest("[data-del]"); if(!b) return;
+  if(prompt(`Delete this backup permanently?\nType the name to confirm:\n${b.dataset.n}`) !== b.dataset.n) return;
   const j = await post("/api/backups/delete/", {path:b.dataset.del}); $("msg").innerHTML = j.ok ? '<span class="text-success">Deleted.</span>' : `<span class="text-danger">${esc(j.error)}</span>`; load(); });
-load();
+$("q").oninput = draw; load();
 </script>{% endblock %}
